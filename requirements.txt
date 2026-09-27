@@ -6,8 +6,7 @@ langgraph>=0.2.20
 # Quản lý schema & dữ liệu (Ràng buộc là dữ liệu)
 pydantic>=2.7.0
 
-# LLM Providers (Cần khi dùng API thật để chạy benchmark)
-langchain-openai>=0.2.0
+# LLM Provider (Chỉ dùng Gemini để tránh lỗi DLL tiktoken trên Windows)
 langchain-google-genai>=2.0.0
 
 # Hỗ trợ cấu hình môi trường & tiện ích
