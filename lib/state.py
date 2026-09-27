@@ -17,7 +17,10 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     user_role: str
     booking_info: Optional[TicketBooking]
-    plan: List[str]
+    plan: List[dict]
     current_step: int
+    step_count: int
+    step_latencies: List[float]
+    last_step: str
     is_completed: bool
     handoff_payload: Optional[dict]

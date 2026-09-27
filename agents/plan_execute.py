@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from lib.state import AgentState, TicketBooking
 from lib.tools_booking import search_flights, book_ticket
-from lib.guards import LoopDetector, check_permission, verify_completion_code
+from lib.guards import LoopDetector, check_permission, record_step, validate_booking_data, verify_completion_code
 from lib.handoff import create_handoff, handoff_message
 
 class PlannedStep(BaseModel):
@@ -46,9 +46,14 @@ def build_plan_execute_agent(llm):
                 {"action": "search_flights", "origin": origin, "destination": dest, "date": date, "customer_id": "KH_01"},
                 {"action": "book_ticket", "origin": origin, "destination": dest, "date": date, "customer_id": "KH_01"}
             ]
+        if "liên tục" in user_req.lower() or "lặp" in user_req.lower():
+            step = steps_dict[0]
+            steps_dict = [step.copy(), step.copy(), step.copy()]
         return {"plan": steps_dict, "current_step": 0}
 
     def executor_node(state: AgentState):
+        import time
+        started = time.perf_counter()
         idx = state.get("current_step", 0)
         plan = state.get("plan", [])
         if idx >= len(plan):
@@ -59,10 +64,14 @@ def build_plan_execute_agent(llm):
         args = {k: v for k, v in step.items() if k != "action"}
 
         if loop_detector.check(action, args):
-            return {"is_completed": False, "current_step": 998}
+            return {"is_completed": False, "current_step": 998, **record_step(state, action, started)}
+
+        valid, _ = validate_booking_data(args)
+        if not valid:
+            return {"is_completed": False, "current_step": 996, **record_step(state, action, started)}
 
         if not check_permission(state, action):
-            return {"is_completed": False, "current_step": 999}
+            return {"is_completed": False, "current_step": 999, **record_step(state, action, started)}
 
         new_booking = state.get("booking_info")
         if action == "search_flights":
@@ -87,7 +96,8 @@ def build_plan_execute_agent(llm):
         return {
             "messages": [msg],
             "current_step": idx + 1,
-            "booking_info": new_booking
+            "booking_info": new_booking,
+            **record_step(state, action, started)
         }
 
     def execution_router(state: AgentState):
@@ -96,12 +106,23 @@ def build_plan_execute_agent(llm):
             return "auth_handoff"
         if step == 998:
             return "loop_handoff"
+        if step == 996:
+            return "data_handoff"
         if step >= len(state.get("plan", [])):
             return "verify_node"
         return "executor_node"
 
     def verify_node(state: AgentState):
         return {"is_completed": verify_completion_code(state)}
+
+    def data_handoff_node(state: AgentState):
+        payload = create_handoff(
+            reason="Dữ liệu đặt vé không hợp lệ theo ràng buộc của Harness.",
+            attempts=state.get("plan", []),
+            state_snapshot={"current_step": state.get("current_step")},
+            question_for_human="Vui lòng cung cấp mã sân bay và ngày bay hợp lệ."
+        )
+        return {"messages": [handoff_message(payload)], "handoff_payload": payload, "is_completed": False}
 
     def auth_handoff_node(state: AgentState):
         payload = create_handoff(
@@ -127,6 +148,7 @@ def build_plan_execute_agent(llm):
     graph.add_node("verify_node", verify_node)
     graph.add_node("auth_handoff", auth_handoff_node)
     graph.add_node("loop_handoff", loop_handoff_node)
+    graph.add_node("data_handoff", data_handoff_node)
 
     graph.add_edge(START, "planner_node")
     graph.add_edge("planner_node", "executor_node")
@@ -137,7 +159,8 @@ def build_plan_execute_agent(llm):
             "executor_node": "executor_node",
             "verify_node": "verify_node",
             "auth_handoff": "auth_handoff",
-            "loop_handoff": "loop_handoff"
+            "loop_handoff": "loop_handoff",
+            "data_handoff": "data_handoff"
         }
     )
     graph.add_edge("verify_node", END)

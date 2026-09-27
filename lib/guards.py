@@ -1,4 +1,5 @@
 import json
+from datetime import date, datetime
 from lib.state import AgentState
 
 class LoopDetector:
@@ -27,6 +28,35 @@ def check_permission(state, tool_name: str) -> bool:
     if tool_name == "book_ticket" and user_role == "guest":
         return False
     return True
+
+def validate_booking_data(args: dict) -> tuple[bool, str]:
+    """Validate booking input before any database/tool call is allowed."""
+    origin = str(args.get("origin", "")).upper()
+    destination = str(args.get("destination", "")).upper()
+    flight_date = str(args.get("date", ""))
+
+    if len(origin) != 3 or len(destination) != 3:
+        return False, "Mã sân bay phải gồm đúng 3 ký tự."
+    if origin == destination:
+        return False, "Sân bay đi và đến không được trùng nhau."
+    try:
+        parsed_date = datetime.strptime(flight_date, "%Y-%m-%d").date()
+    except ValueError:
+        return False, "Ngày bay phải có định dạng YYYY-MM-DD."
+    if parsed_date < date.today():
+        return False, "Ngày bay phải là ngày hiện tại hoặc một ngày trong tương lai."
+    return True, ""
+
+def record_step(state: AgentState, step_name: str, started: float) -> dict:
+    """Keep comparable action counts and per-step timings in the graph state."""
+    import time
+    latencies = list(state.get("step_latencies", []))
+    latencies.append(round(time.perf_counter() - started, 6))
+    return {
+        "step_count": state.get("step_count", 0) + 1,
+        "step_latencies": latencies,
+        "last_step": step_name,
+    }
 
 def verify_completion_code(state) -> bool:
     """Tiêu chí hoàn thành kiểm bằng code, không tin text của LLM."""

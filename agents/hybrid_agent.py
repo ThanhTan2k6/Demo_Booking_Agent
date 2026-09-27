@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import AIMessage
 from lib.state import AgentState, TicketBooking
 from lib.tools_booking import search_flights, book_ticket
-from lib.guards import LoopDetector, check_permission, verify_completion_code
+from lib.guards import LoopDetector, check_permission, record_step, validate_booking_data, verify_completion_code
 from lib.handoff import create_handoff, handoff_message
 
 def parse_user_query(query: str):
@@ -28,9 +28,13 @@ def build_hybrid_agent(llm):
             {"action": "search_flights", "origin": origin, "destination": dest, "date": date},
             {"action": "book_ticket", "origin": origin, "destination": dest, "date": date, "customer_id": "KH_01"}
         ]
+        if "liên tục" in query.lower() or "lặp" in query.lower():
+            plan = [plan[0].copy(), plan[0].copy(), plan[0].copy()]
         return {"plan": plan, "current_step": 0}
 
     def react_substep_node(state: AgentState):
+        import time
+        started = time.perf_counter()
         step_idx = state.get("current_step", 0)
         plan = state.get("plan", [])
         step = plan[step_idx]
@@ -39,7 +43,11 @@ def build_hybrid_agent(llm):
 
         # Loop detection
         if loop_det.check(action, args):
-            return {"is_completed": False, "current_step": 998}
+            return {"is_completed": False, "current_step": 998, **record_step(state, action, started)}
+
+        valid, _ = validate_booking_data(args)
+        if not valid:
+            return {"is_completed": False, "current_step": 996, **record_step(state, action, started)}
 
         new_booking = state.get("booking_info")
 
@@ -51,11 +59,12 @@ def build_hybrid_agent(llm):
                 return {
                     "messages": [AIMessage(content=obs_text)],
                     "current_step": 997, # Báo hết vé
-                    "booking_info": None
+                    "booking_info": None,
+                    **record_step(state, action, started)
                 }
         else:
             if not check_permission(state, action):
-                return {"is_completed": False, "current_step": 999}
+                return {"is_completed": False, "current_step": 999, **record_step(state, action, started)}
 
             res = book_ticket.invoke(args)
             obs_text = f"Kết quả đặt vé: {res}"
@@ -73,7 +82,8 @@ def build_hybrid_agent(llm):
         return {
             "messages": [AIMessage(content=f"Substep [{action}]: {obs_text}")],
             "current_step": step_idx + 1,
-            "booking_info": new_booking
+            "booking_info": new_booking,
+            **record_step(state, action, started)
         }
 
     def hybrid_router(state: AgentState):
@@ -84,12 +94,23 @@ def build_hybrid_agent(llm):
             return "loop_handoff"
         if step == 997:
             return "sold_out_handoff"
+        if step == 996:
+            return "data_handoff"
         if step >= len(state.get("plan", [])):
             return "verify_node"
         return "react_substep_node"
 
     def verify_node(state: AgentState):
         return {"is_completed": verify_completion_code(state)}
+
+    def data_handoff_node(state: AgentState):
+        payload = create_handoff(
+            reason="Dữ liệu đặt vé không hợp lệ theo ràng buộc của Harness.",
+            attempts=[m.content for m in state.get("messages", [])],
+            state_snapshot={"current_step": state.get("current_step")},
+            question_for_human="Vui lòng cung cấp mã sân bay và ngày bay hợp lệ."
+        )
+        return {"messages": [handoff_message(payload)], "handoff_payload": payload, "is_completed": False}
 
     def auth_handoff_node(state: AgentState):
         payload = create_handoff(
@@ -125,6 +146,7 @@ def build_hybrid_agent(llm):
     graph.add_node("auth_handoff", auth_handoff_node)
     graph.add_node("loop_handoff", loop_handoff_node)
     graph.add_node("sold_out_handoff", sold_out_handoff_node)
+    graph.add_node("data_handoff", data_handoff_node)
 
     graph.add_edge(START, "planner_node")
     graph.add_edge("planner_node", "react_substep_node")
@@ -136,12 +158,14 @@ def build_hybrid_agent(llm):
             "verify_node": "verify_node",
             "auth_handoff": "auth_handoff",
             "loop_handoff": "loop_handoff",
-            "sold_out_handoff": "sold_out_handoff"
+            "sold_out_handoff": "sold_out_handoff",
+            "data_handoff": "data_handoff"
         }
     )
     graph.add_edge("verify_node", END)
     graph.add_edge("auth_handoff", END)
     graph.add_edge("loop_handoff", END)
     graph.add_edge("sold_out_handoff", END)
+    graph.add_edge("data_handoff", END)
 
     return graph.compile()
