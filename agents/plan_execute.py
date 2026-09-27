@@ -27,12 +27,10 @@ def build_plan_execute_agent(llm):
             "và trích xuất danh sách các bước (action, origin, destination, date, customer_id)."
         )
         try:
-            # Ưu tiên structured output nếu LLM hỗ trợ
             structured_llm = llm.with_structured_output(PlanSchema)
             plan_obj = structured_llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_req)])
             steps_dict = [step.model_dump() for step in plan_obj.steps]
         except Exception:
-            # Fallback trích xuất nếu dùng MockLLM
             origin = "SGN" if "SGN" in user_req.upper() else "HAN"
             dest = (
                 "DAD" if "DAD" in user_req.upper()
@@ -76,6 +74,14 @@ def build_plan_execute_agent(llm):
         new_booking = state.get("booking_info")
         if action == "search_flights":
             res = search_flights.invoke(args)
+            if res.get("status") == "not_found" or res.get("seats", 0) <= 0:
+                reason = "Không tìm thấy chuyến bay phù hợp." if res.get("status") == "not_found" else "Chuyến bay đã hết chỗ."
+                return {
+                    "messages": [AIMessage(content=f"Dừng kế hoạch: {reason}")],
+                    "current_step": 997,
+                    "booking_info": None,
+                    **record_step(state, action, started)
+                }
             msg = AIMessage(content=f"Thực thi {action}: {res}")
         elif action == "book_ticket":
             res = book_ticket.invoke(args)
@@ -106,6 +112,8 @@ def build_plan_execute_agent(llm):
             return "auth_handoff"
         if step == 998:
             return "loop_handoff"
+        if step == 997:
+            return "sold_out_handoff"
         if step == 996:
             return "data_handoff"
         if step >= len(state.get("plan", [])):
@@ -142,12 +150,22 @@ def build_plan_execute_agent(llm):
         )
         return {"messages": [handoff_message(payload)], "handoff_payload": payload, "is_completed": False}
 
+    def sold_out_handoff_node(state: AgentState):
+        payload = create_handoff(
+            reason="Chuyến bay đã hết chỗ hoặc không tìm thấy chuyến bay theo yêu cầu.",
+            attempts=state.get("plan", []),
+            state_snapshot={"current_step": state.get("current_step")},
+            question_for_human="Khách có muốn đổi sang ngày khác hoặc chọn chặng bay khác không?"
+        )
+        return {"messages": [handoff_message(payload)], "handoff_payload": payload, "is_completed": False}
+
     graph = StateGraph(AgentState)
     graph.add_node("planner_node", planner_node)
     graph.add_node("executor_node", executor_node)
     graph.add_node("verify_node", verify_node)
     graph.add_node("auth_handoff", auth_handoff_node)
     graph.add_node("loop_handoff", loop_handoff_node)
+    graph.add_node("sold_out_handoff", sold_out_handoff_node)
     graph.add_node("data_handoff", data_handoff_node)
 
     graph.add_edge(START, "planner_node")
@@ -160,11 +178,14 @@ def build_plan_execute_agent(llm):
             "verify_node": "verify_node",
             "auth_handoff": "auth_handoff",
             "loop_handoff": "loop_handoff",
+            "sold_out_handoff": "sold_out_handoff",
             "data_handoff": "data_handoff"
         }
     )
     graph.add_edge("verify_node", END)
     graph.add_edge("auth_handoff", END)
     graph.add_edge("loop_handoff", END)
+    graph.add_edge("sold_out_handoff", END)
+    graph.add_edge("data_handoff", END)
 
     return graph.compile()
