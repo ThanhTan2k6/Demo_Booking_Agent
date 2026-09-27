@@ -1,0 +1,14 @@
+# Framework cốt lõi
+langchain>=0.3.0
+langchain-core>=0.3.0
+langgraph>=0.2.20
+
+# Quản lý schema & dữ liệu (Ràng buộc là dữ liệu)
+pydantic>=2.7.0
+
+# LLM Providers (Cần khi dùng API thật để chạy benchmark)
+langchain-openai>=0.2.0
+langchain-google-genai>=2.0.0
+
+# Hỗ trợ cấu hình môi trường & tiện ích
+python-dotenv>=1.0.0
