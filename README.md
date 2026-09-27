@@ -113,33 +113,31 @@ Danh sách 6 test case kiểm thử:
 - **TC6:** Yêu cầu vòng lặp (Yêu cầu tìm kiếm lặp đi lặp lại liên tục).
 
 ---
-
 ## 5. Kết Quả Đo Đạc Thực Nghiệm (Benchmark)
 
 Bảng tổng hợp thu thập từ lần đo thực nghiệm tự động với 6 kịch bản kiểm thử:
 
 | Mẫu thiết kế | Tỷ lệ thành công | Tỷ lệ bàn giao (Handoff) | Thời gian thực thi TB |
 | :--- | :---: | :---: | :---: |
-| **ReAct** | **16.7%** (1/6) | **83.3%** (5/6) | **0.006s** |
-| **Plan-Execute** | **16.7%** (1/6) | **50.0%** (3/6) | **0.003s** |
-| **Hybrid** | **16.7%** (1/6) | **83.3%** (5/6) | **0.002s** |
+| **ReAct** | **16.7%** (1/6) | **83.3%** (5/6) | **0.005s** |
+| **Plan-Execute** | **16.7%** (1/6) | **83.3%** (5/6) | **0.004s** |
+| **Hybrid** | **16.7%** (1/6) | **83.3%** (5/6) | **0.004s** |
 
 ### Chi tiết các ca kiểm thử:
 - **ReAct Agent:**
-  - **TC1:** Hoàn thành: `True` | Bàn giao: `False` (5 bước, 0.017s)
+  - **TC1:** Hoàn thành: `True` | Bàn giao: `False` (5 bước, 0.014s)
   - **TC2 - TC6:** Hoàn thành: `False` | Bàn giao: `True` (Chặn quyền Guest tại 3 bước; phát hiện hết chỗ/không tìm thấy chuyến tại 5-7 bước; chặn sai ngày ngay bước 1; bắt lặp tại 5 bước).
 - **Plan-Execute Agent:**
-  - **TC1:** Hoàn thành: `True` | Bàn giao: `False` (2 bước, 0.004s)
-  - **TC2, TC5, TC6:** Bàn giao: `True` (Chặn quyền, sai ngày, bắt lặp kế hoạch thành công).
-  - **TC3, TC4:** Hoàn thành: `False` | Bàn giao: `False` (Do kế hoạch được lập tĩnh ban đầu gồm `[search, book]`, khi bước search báo hết vé/không tìm thấy, chu trình không tự động rẽ nhánh sang Handoff mà chỉ dừng lại mà không tạo vé).
-- **Hybrid Agent:**
   - **TC1:** Hoàn thành: `True` | Bàn giao: `False` (2 bước, 0.003s)
-  - **TC2 - TC6:** Hoàn thành: `False` | Bàn giao: `True` (Bắt lỗi và kích hoạt handoff triệt để ở tất cả các tình huống bất thường: chặn hết vé/không tìm thấy ngay tại bước 1, chặn quyền tại bước 2, chặn sai ngày tại bước 1, bắt lặp tại bước 3).
+  - **TC2 - TC6:** Hoàn thành: `False` | Bàn giao: `True` (Bắt lỗi và ngắt kích hoạt Handoff chính xác: chặn quyền Guest tại 2 bước; bắt dừng do hết vé / không thấy chuyến ngay từ bước tra cứu đầu tiên; chặn sai ngày tại bước 1; bắt lặp kế hoạch tại bước 3).
+- **Hybrid Agent:**
+  - **TC1:** Hoàn thành: `True` | Bàn giao: `False` (2 bước, 0.006s)
+  - **TC2 - TC6:** Hoàn thành: `False` | Bàn giao: `True` (Bắt lỗi và kích hoạt bàn giao triệt để ở tất cả các tình huống bất thường: chặn hết vé/không tìm thấy ngay tại bước 1, chặn quyền tại bước 2, chặn sai ngày tại bước 1, bắt lặp tại bước 3).
 
 ### Nhận xét & Đánh giá hiệu quả kiến trúc:
 1. **Tính chính xác và An toàn (16.7% Success Rate):**
-   - Tập dữ liệu gồm 1 ca hợp lệ (TC1) và 5 ca bất thường/vi phạm quy tắc (TC2–TC6). Do đó, tỷ lệ hoàn thành chính xác 1/6 (16.7%) trên cả 3 agent chứng minh rằng hàm kiểm tra hoàn thành bằng code (`verify_completion_code`) hoạt động tuyệt đối chính xác: **không có bất kỳ ca vi phạm nào bị gắn nhãn hoàn thành sai**.
-2. **Khả năng phản ứng & Bàn giao (Handoff Rate):**
-   - **Hybrid Agent (83.3% handoff, 0.002s TB):** Đạt hiệu năng tối ưu nhất. Nhờ kế hoạch sơ bộ nhưng từng substep lại có cơ chế rẽ nhánh phản xạ, Hybrid Agent vừa tối ưu số bước xử lý (chỉ 1–3 bước mỗi case) vừa kích hoạt bàn giao an toàn cho toàn bộ 5 ca lỗi.
-   - **ReAct Agent (83.3% handoff, 0.006s TB):** An toàn cao tương đương Hybrid nhưng tốn nhiều bước tương tác qua lại hơn (5–7 bước cho các ca tra cứu và hết vé), dẫn đến thời gian thực thi dài hơn.
-   - **Plan-Execute Agent (50.0% handoff, 0.003s TB):** Tốc độ nhanh do ít bước, nhưng bộc lộ điểm yếu cố hữu của mô hình lập kế hoạch tĩnh: khi kết quả thực tế của bước tra cứu thay đổi (hết vé, không thấy chuyến), agent không tự thích ứng để kích hoạt bàn giao ngoại lệ.
+   - Tập dữ liệu gồm 1 ca hợp lệ (TC1) và 5 ca bất thường/vi phạm quy tắc (TC2–TC6). Tỷ lệ hoàn thành đạt chuẩn tuyệt đối 1/6 (16.7%) trên cả 3 agent chứng minh hàm kiểm tra hoàn thành bằng code (`verify_completion_code`) vận hành độc lập, chính xác: **không có bất kỳ ca vi phạm nào bị cấp mã đặt vé hay báo hoàn thành sai**.
+2. **Khả năng phản ứng & Bàn giao (83.3% Handoff Rate):**
+   - Cả 3 mô hình đều đạt tỷ lệ bàn giao **83.3%** (5/6 ca ngoại lệ), đảm bảo mọi tình huống không thể tự giải quyết đều được đóng gói ngữ cảnh chuyển giao cho con người an toàn.
+   - **Plan-Execute & Hybrid Agent:** Tối ưu hóa số bước thực thi vượt trội (chỉ từ 1–3 bước mỗi case) nhờ khả năng ngắt sớm ngay khi phát hiện bước không khả thi (ví dụ dừng ngay tại bước 1 khi chuyến bay hết chỗ hoặc sai dữ liệu), đạt thời gian trung bình ấn tượng **0.004s**.
+   - **ReAct Agent:** Vẫn đảm bảo độ an toàn cao nhất nhưng tốn nhiều bước tương tác qua lại hơn giữa suy luận và công cụ (từ 3–7 bước), dẫn đến độ trễ tổng thể cao hơn (**0.005s**).
